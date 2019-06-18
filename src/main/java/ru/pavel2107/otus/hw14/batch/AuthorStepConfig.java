@@ -4,7 +4,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.batch.core.*;
 import org.springframework.batch.core.configuration.annotation.EnableBatchProcessing;
-import org.springframework.batch.core.configuration.annotation.JobBuilderFactory;
 import org.springframework.batch.core.configuration.annotation.StepBuilderFactory;
 import org.springframework.batch.core.scope.context.ChunkContext;
 import org.springframework.batch.core.step.tasklet.TaskletStep;
@@ -12,13 +11,11 @@ import org.springframework.batch.item.ItemProcessor;
 import org.springframework.batch.item.ItemWriter;
 import org.springframework.batch.item.database.JdbcCursorItemReader;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.data.mongodb.core.MongoTemplate;
-import org.springframework.jdbc.core.RowMapper;
 
 import javax.sql.DataSource;
-import java.sql.ResultSet;
-import java.sql.SQLException;
 import java.util.List;
 
 import ru.pavel2107.otus.hw14.mongoDB.domain.MongoAuthor;
@@ -31,64 +28,38 @@ public class AuthorStepConfig {
 
         final private String SELECT_SQL = "select * from authors";
 
-        public JobBuilderFactory jobBuilderFactory;
-        public StepBuilderFactory stepBuilderFactory;
-        private DataSource dataSource;
-        private MongoTemplate mongoTemplate;
+        @Autowired private StepBuilderFactory stepBuilderFactory;
+        @Autowired private DataSource dataSource;
+        @Autowired private MongoTemplate mongoTemplate;
 
-
-        @Autowired
-        public AuthorStepConfig(
-                JobBuilderFactory jobBuilderFactory,
-                StepBuilderFactory stepBuilderFactory,
-                DataSource dataSource,
-                MongoTemplate mongoTemplate){
-
-            this.jobBuilderFactory  = jobBuilderFactory;
-            this.stepBuilderFactory = stepBuilderFactory;
-            this.mongoTemplate      = mongoTemplate;
-            this.dataSource         = dataSource;
-        }
-
+        @Bean
         JdbcCursorItemReader<Author> readerAuthor(){
             JdbcCursorItemReader<Author> reader = new JdbcCursorItemReader<>();
             reader.setDataSource( dataSource);
             reader.setSql( SELECT_SQL);
-            reader.setRowMapper( new AuthorRowMapper());
-
-            return reader;
-        }
-
-        private static class AuthorRowMapper implements RowMapper<Author> {
-
-            @Override
-            public Author mapRow(ResultSet resultSet, int i) throws SQLException {
+            reader.setRowMapper((resultSet, i) -> {
                 Author Author = new Author();
                 Author.setName( resultSet.getString( "name"));
                 Author.setId(   resultSet.getLong( "id"));
                 return Author;
-            }
+            });
+
+            return reader;
         }
 
-
-        class MongoWriterAuthor implements ItemWriter<MongoAuthor> {
-
-            @Override
-            public void write(List<? extends MongoAuthor> list) throws Exception {
+        @Bean
+        ItemWriter writerAuthor(){
+            return (ItemWriter<MongoAuthor>) list -> {
                 for( int i = 0; i < list.size(); i++){
                     MongoAuthor mongoAuthor = list.get( i);
                     logger.info( "Записываем Author.id=" + mongoAuthor.getId());
                     mongoTemplate.save( mongoAuthor);
                 }
-            }
+            };
         }
 
-        public ItemWriter writerAuthor(){
-            return new MongoWriterAuthor();
-        }
-
-
-        public ItemProcessor processorAuthor(){
+        @Bean
+        ItemProcessor processorAuthor(){
             return ( ItemProcessor<Author, MongoAuthor>) Author ->{
                 MongoAuthor mongoAuthor = new MongoAuthor();
                 mongoAuthor.setId(   Author.getId().toString());
@@ -97,13 +68,13 @@ public class AuthorStepConfig {
             };
         }
 
-
-        public Step stepAuthor(){
+        @Bean
+        public Step stepAuthor( JdbcCursorItemReader<Author> readerAuthor, ItemWriter writerAuthor, ItemProcessor processorAuthor){
             TaskletStep stepAuthor = stepBuilderFactory.get("stepAuthor")
                     .chunk(5)
-                    .reader(readerAuthor())
-                    .writer( writerAuthor())
-                    .processor(processorAuthor())
+                    .reader(readerAuthor)
+                    .writer( writerAuthor)
+                    .processor(processorAuthor)
                     .listener(new ItemReadListener() {
                         public void beforeRead() { logger.info("Начало чтения"); }
                         public void afterRead(Object o) { logger.info("Конец чтения"); }
@@ -124,10 +95,7 @@ public class AuthorStepConfig {
                         public void afterChunk(ChunkContext chunkContext) {logger.info("Конец пачки");}
                         public void afterChunkError(ChunkContext chunkContext) {logger.info("Ошибка пачки");}
                     })
-
                     .build();
             return stepAuthor;
         }
-
 }
-

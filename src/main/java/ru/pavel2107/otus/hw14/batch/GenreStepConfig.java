@@ -12,13 +12,11 @@ import org.springframework.batch.item.ItemProcessor;
 import org.springframework.batch.item.ItemWriter;
 import org.springframework.batch.item.database.JdbcCursorItemReader;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.data.mongodb.core.MongoTemplate;
-import org.springframework.jdbc.core.RowMapper;
 
 import javax.sql.DataSource;
-import java.sql.ResultSet;
-import java.sql.SQLException;
 import java.util.List;
 
 import ru.pavel2107.otus.hw14.mongoDB.domain.MongoGenre;
@@ -32,62 +30,38 @@ public class GenreStepConfig {
 
     final private String SELECT_SQL = "select * from genre";
 
-    public JobBuilderFactory jobBuilderFactory;
-    public StepBuilderFactory stepBuilderFactory;
-    private DataSource dataSource;
-    private MongoTemplate mongoTemplate;
+    @Autowired private JobBuilderFactory jobBuilderFactory;
+    @Autowired private StepBuilderFactory stepBuilderFactory;
+    @Autowired private DataSource dataSource;
+    @Autowired private MongoTemplate mongoTemplate;
 
-
-    @Autowired
-    public GenreStepConfig(
-            JobBuilderFactory jobBuilderFactory,
-            StepBuilderFactory stepBuilderFactory,
-            DataSource dataSource,
-            MongoTemplate mongoTemplate){
-
-        this.jobBuilderFactory  = jobBuilderFactory;
-        this.stepBuilderFactory = stepBuilderFactory;
-        this.mongoTemplate      = mongoTemplate;
-        this.dataSource         = dataSource;
-    }
-
+    @Bean
     JdbcCursorItemReader<Genre> readerGenre(){
         JdbcCursorItemReader<Genre> reader = new JdbcCursorItemReader<>();
         reader.setDataSource( dataSource);
         reader.setSql( SELECT_SQL);
-        reader.setRowMapper( new GenreRowMapper());
-
-        return reader;
-    }
-
-    private static class GenreRowMapper implements RowMapper<Genre> {
-
-        @Override
-        public Genre mapRow(ResultSet resultSet, int i) throws SQLException {
+        reader.setRowMapper((resultSet, i) -> {
             Genre genre = new Genre();
             genre.setName( resultSet.getString( "name"));
             genre.setId(   resultSet.getLong( "id"));
             return genre;
-        }
+        });
+        return reader;
     }
 
-   class MongoWriterGenre implements ItemWriter<MongoGenre>{
-
-       @Override
-       public void write(List<? extends MongoGenre> list) throws Exception {
+   @Bean
+   ItemWriter writerGenre(){
+       return (ItemWriter<MongoGenre>) list -> {
            for( int i = 0; i < list.size(); i++){
                MongoGenre mongoGenre = list.get( i);
                logger.info( "Записываем genre.id=" + mongoGenre.getId());
                mongoTemplate.save( mongoGenre);
            }
-       }
+       };
    }
 
-   public ItemWriter writerGenre(){
-        return new MongoWriterGenre();
-   }
-
-    public ItemProcessor processorGenre(){
+   @Bean
+    ItemProcessor processorGenre(){
         return ( ItemProcessor<Genre, MongoGenre>) genre ->{
             MongoGenre mongoGenre = new MongoGenre();
             mongoGenre.setId(   genre.getId().toString());
@@ -96,12 +70,13 @@ public class GenreStepConfig {
         };
     }
 
-    public Step stepGenre(){
+    @Bean
+    public Step stepGenre( JdbcCursorItemReader<Genre> readerGenre, ItemWriter writerGenre, ItemProcessor processorGenre){
         TaskletStep stepGenre = stepBuilderFactory.get("stepGenre")
                 .chunk(5)
-                .reader(readerGenre())
-                .writer( writerGenre())
-                .processor(processorGenre())
+                .reader(readerGenre)
+                .writer( writerGenre)
+                .processor(processorGenre)
                 .listener(new ItemReadListener() {
                     public void beforeRead() { logger.info("Начало чтения"); }
                     public void afterRead(Object o) { logger.info("Конец чтения"); }
@@ -126,5 +101,4 @@ public class GenreStepConfig {
                 .build();
         return stepGenre;
     }
-
 }
